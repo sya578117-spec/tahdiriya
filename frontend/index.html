@@ -165,6 +165,11 @@
           </div>
         </div>
 
+        <!-- الخطة الدراسية -->
+        <div class="tab-pane hidden" id="pane-plan">
+          <div id="plan-list"></div>
+        </div>
+
         <!-- الأدمن -->
         <div class="tab-pane hidden" id="pane-admin">
           <div class="card">
@@ -182,6 +187,38 @@
             <div id="admin-sessions"></div>
           </div>
           <div class="card">
+            <h3>🗓️ الخطط الدراسية</h3>
+            <p class="muted small">أنشئ خطة أسبوعية (7 أيام) أو شهرية (4 أسابيع) — كل سطر مهمة.</p>
+            <div id="admin-plans-list"></div>
+            <hr />
+            <h4 id="plan-form-title">خطة جديدة</h4>
+            <input type="hidden" id="plan-edit-id" value="" />
+            <label class="fld-label">العنوان</label>
+            <input type="text" id="plan-title" maxlength="120" placeholder="مثال: خطة الفصل الأول — أسبوع المراجعة" />
+            <div class="form-row">
+              <div>
+                <label class="fld-label">النوع</label>
+                <select id="plan-type">
+                  <option value="weekly">أسبوعية (7 أيام)</option>
+                  <option value="monthly">شهرية (4 أسابيع)</option>
+                </select>
+              </div>
+              <div>
+                <label class="fld-label">الفصل</label>
+                <select id="plan-semester">
+                  <option value="both">كلا الفصلين</option>
+                  <option value="sem1">الفصل الأول</option>
+                  <option value="sem2">الفصل الثاني</option>
+                </select>
+              </div>
+            </div>
+            <div id="plan-blocks"></div>
+            <div class="form-row">
+              <button class="btn btn-primary" id="btn-plan-save">حفظ الخطة 💾</button>
+              <button class="btn hidden" id="btn-plan-cancel">إلغاء ✖️</button>
+            </div>
+          </div>
+          <div class="card">
             <h3>📢 إعلان جديد</h3>
             <textarea id="admin-announce-text" rows="3" maxlength="2000" placeholder="نص الإعلان لجميع الطلاب…"></textarea>
             <button class="btn btn-primary" id="btn-admin-announce">إرسال الإعلان 📢</button>
@@ -194,6 +231,7 @@
         <button class="tab" data-tab="library">📁<span>المكتبة</span></button>
         <button class="tab" data-tab="sessions">📅<span>الحصص</span></button>
         <button class="tab" data-tab="tasks">✅<span>المهام</span></button>
+        <button class="tab" data-tab="plan">🗓️<span>الخطة</span></button>
         <button class="tab" data-tab="pomodoro">🍅<span>تركيز</span></button>
         <button class="tab" data-tab="quiz">❓<span>اختبار</span></button>
         <button class="tab" data-tab="motivation">💡<span>تحفيز</span></button>
