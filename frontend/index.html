@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>تحضيرية 🩺</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- شاشة اختيار الفصل (تظهر إن لم يكن محفوظاً) -->
+    <section id="screen-semester" class="screen hidden">
+      <div class="hero">
+        <div class="hero-emoji">🩺</div>
+        <h1>تحضيرية</h1>
+        <p>رفيقك في السنة التحضيرية للكليات الطبية في سوريا</p>
+      </div>
+      <div class="card">
+        <h2>اختر فصلك الدراسي</h2>
+        <div class="branch-buttons">
+          <button class="btn btn-branch" data-semester="sem1">📗 الفصل الأول</button>
+          <button class="btn btn-branch" data-semester="sem2">📘 الفصل الثاني</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- التطبيق الرئيسي -->
+    <section id="screen-main" class="screen hidden">
+      <header class="topbar">
+        <div class="topbar-title">🩺 تحضيرية</div>
+        <div class="topbar-streak" id="topbar-streak" title="أيام الالتزام المتتالية">🔥 0</div>
+      </header>
+
+      <main id="tab-content">
+        <!-- الرئيسية -->
+        <div class="tab-pane" id="pane-home">
+          <div class="card countdown-card">
+            <div class="countdown-number" id="countdown-days">…</div>
+            <div class="countdown-label"><span id="countdown-label"></span><br /><span id="countdown-date" class="muted"></span></div>
+          </div>
+          <div class="grid-2">
+            <div class="card stat-card">
+              <div class="ring-wrap">
+                <svg class="ring" viewBox="0 0 80 80">
+                  <circle cx="40" cy="40" r="34" class="ring-bg" />
+                  <circle cx="40" cy="40" r="34" class="ring-fg" id="ring-fg" />
+                </svg>
+                <div class="ring-text" id="ring-text">0%</div>
+              </div>
+              <div class="stat-label">إنجاز مهام اليوم</div>
+            </div>
+            <div class="card stat-card">
+              <div class="big-number" id="focus-today">0</div>
+              <div class="stat-label">دقيقة تركيز اليوم 🍅</div>
+              <div class="stat-sub" id="quiz-mini"></div>
+            </div>
+          </div>
+          <div class="card">
+            <h3>⏰ تذكيراتي الشخصية</h3>
+            <div id="my-reminders" class="reminders"></div>
+            <div class="reminder-form">
+              <input id="rem-label" type="text" maxlength="120" placeholder="مثال: مراجعة تشريح" />
+              <input id="rem-time" type="time" />
+              <button class="btn btn-primary" id="btn-add-reminder">إضافة ➕</button>
+            </div>
+            <p class="muted small">تصلك التذكيرات يومياً بتوقيت دمشق عبر البوت.</p>
+          </div>
+          <div class="card" id="announce-card">
+            <h3>📢 آخر الإعلانات</h3>
+            <div id="announcements"></div>
+          </div>
+          <div class="card tip-card">
+            <div class="tip-title">💡 نصيحة اليوم</div>
+            <div class="tip-text" id="home-tip">…</div>
+          </div>
+          <div class="quick-nav">
+            <button class="btn btn-quick" data-goto="library">📁 المكتبة</button>
+            <button class="btn btn-quick" data-goto="sessions">📅 الحصص</button>
+            <button class="btn btn-quick" data-goto="quiz">❓ اختبار اليوم</button>
+            <button class="btn btn-quick" data-goto="pomodoro">🍅 ابدأ تركيزاً</button>
+          </div>
+        </div>
+
+        <!-- المكتبة -->
+        <div class="tab-pane hidden" id="pane-library">
+          <div class="card">
+            <h2>📁 مكتبة التحضيرية</h2>
+            <input id="lib-search" type="search" placeholder="ابحث باسم الملف أو المصدر…" />
+            <div class="filter-row">
+              <select id="lib-subject"><option value="">كل المواد</option></select>
+              <select id="lib-type"><option value="">كل الأنواع</option></select>
+            </div>
+            <div id="library-list" class="file-list"></div>
+          </div>
+        </div>
+
+        <!-- الحصص -->
+        <div class="tab-pane hidden" id="pane-sessions">
+          <div class="card">
+            <h2>📅 الحصص الدراسية القادمة</h2>
+            <div id="sessions-list"></div>
+          </div>
+        </div>
+
+        <!-- المهام -->
+        <div class="tab-pane hidden" id="pane-tasks">
+          <div class="card">
+            <h2>✅ مهام اليوم</h2>
+            <div class="progress-bar"><div class="progress-fill" id="tasks-progress"></div></div>
+            <div class="progress-text" id="tasks-progress-text"></div>
+            <div id="checklist" class="checklist"></div>
+            <button class="btn btn-primary hidden" id="btn-gen-tasks">توليد مهام اليوم 📝</button>
+          </div>
+        </div>
+
+        <!-- بومودورو -->
+        <div class="tab-pane hidden" id="pane-pomodoro">
+          <div class="card timer-card">
+            <h2>🍅 مؤقت التركيز</h2>
+            <div class="mode-switch">
+              <button class="btn btn-mode active" data-mode="focus" data-minutes="25">تركيز 25</button>
+              <button class="btn btn-mode" data-mode="break" data-minutes="5">استراحة 5</button>
+            </div>
+            <div class="timer-display" id="timer-display">25:00</div>
+            <div class="timer-controls">
+              <button class="btn btn-primary" id="btn-timer-start">ابدأ ▶️</button>
+              <button class="btn" id="btn-timer-reset">إعادة تعيين ↺</button>
+            </div>
+            <div class="timer-msg" id="timer-msg"></div>
+          </div>
+          <div class="card">
+            <h3>📊 جلساتي</h3>
+            <p class="muted" id="pomodoro-stats">…</p>
+          </div>
+        </div>
+
+        <!-- الاختبار -->
+        <div class="tab-pane hidden" id="pane-quiz">
+          <div class="card">
+            <h2>❓ اختبار اليوم</h2>
+            <p class="muted small">تدريب يومي على نمط الامتحان المؤتمت (MCQ)</p>
+            <div id="quiz-box">
+              <div class="quiz-subject" id="quiz-subject"></div>
+              <div class="quiz-question" id="quiz-question">…</div>
+              <div class="quiz-options" id="quiz-options"></div>
+              <div class="quiz-feedback hidden" id="quiz-feedback"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- تحفيز -->
+        <div class="tab-pane hidden" id="pane-motivation">
+          <div class="card tip-card big">
+            <div class="tip-title">💡 نصيحة اليوم</div>
+            <div class="tip-text" id="motivation-tip">…</div>
+            <button class="btn" id="btn-new-tip">نصيحة أخرى 🔄</button>
+          </div>
+          <div class="card">
+            <h3>🔥 سلسلة الالتزام</h3>
+            <p class="muted" id="streak-detail">…</p>
+          </div>
+        </div>
+
+        <!-- الأدمن -->
+        <div class="tab-pane hidden" id="pane-admin">
+          <div class="card">
+            <h2>🛠️ لوحة الأدمن</h2>
+            <div id="admin-stats" class="muted">…</div>
+          </div>
+          <div class="card">
+            <h3>📁 إدارة المكتبة</h3>
+            <p class="muted small">لإضافة ملف: أرسله في محادثة البوت ثم صنّفه عبر /admin.<br />هنا يمكنك حذف ملفات:</p>
+            <div id="admin-files" class="file-list"></div>
+          </div>
+          <div class="card">
+            <h3>📅 إدارة الحصص</h3>
+            <p class="muted small">لجدولة حصة جديدة استخدم /admin في محادثة البوت.</p>
+            <div id="admin-sessions"></div>
+          </div>
+          <div class="card">
+            <h3>📢 إعلان جديد</h3>
+            <textarea id="admin-announce-text" rows="3" maxlength="2000" placeholder="نص الإعلان لجميع الطلاب…"></textarea>
+            <button class="btn btn-primary" id="btn-admin-announce">إرسال الإعلان 📢</button>
+          </div>
+        </div>
+      </main>
+
+      <nav class="tabbar">
+        <button class="tab active" data-tab="home">🏠<span>الرئيسية</span></button>
+        <button class="tab" data-tab="library">📁<span>المكتبة</span></button>
+        <button class="tab" data-tab="sessions">📅<span>الحصص</span></button>
+        <button class="tab" data-tab="tasks">✅<span>المهام</span></button>
+        <button class="tab" data-tab="pomodoro">🍅<span>تركيز</span></button>
+        <button class="tab" data-tab="quiz">❓<span>اختبار</span></button>
+        <button class="tab" data-tab="motivation">💡<span>تحفيز</span></button>
+        <button class="tab hidden" data-tab="admin" id="tab-admin">🛠️<span>أدمن</span></button>
+      </nav>
+    </section>
+
+    <!-- شاشة خارج تيليجرام -->
+    <section id="screen-error" class="screen hidden">
+      <div class="card">
+        <h2>⚠️ افتح التطبيق من تيليجرام</h2>
+        <p class="muted">تطبيق «تحضيرية» يعمل داخل تيليجرام. افتحه عبر زر «افتح تطبيق تحضيرية» في البوت.</p>
+      </div>
+    </section>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
