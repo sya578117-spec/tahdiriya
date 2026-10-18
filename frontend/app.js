@@ -46,6 +46,7 @@
     if (name === "sessions") loadSessions();
     if (name === "tasks") loadChecklist();
     if (name === "plan") loadPlan();
+    if (name === "qbank") loadQBank();
     if (name === "pomodoro") loadPomodoroStats();
     if (name === "quiz") loadQuiz();
     if (name === "motivation") loadMotivation();
@@ -407,6 +408,123 @@
       ". أكمل كل مهام اليوم لتمديد السلسلة!";
   }
 
+  /* ---------- بنك الأسئلة التفاعلي ---------- */
+  let qb = { questions: [], idx: 0, score: 0, answered: false, results: [] };
+
+  async function loadQBank() {
+    showQBankScreen("qbank-home");
+    const data = await api("/api/qbank/subjects");
+    const box = $("qbank-subjects");
+    box.innerHTML = "";
+    if (!data.subjects.length) {
+      box.innerHTML = '<p class="muted">لا توجد أسئلة بعد — تُضاف قريباً 📝</p>';
+      return;
+    }
+    data.subjects.forEach((s) => {
+      const div = document.createElement("div");
+      div.className = "qbank-subject-row";
+      const acc = s.answered ? Math.round((s.correct / s.answered) * 100) + "% دقة" : "لم تُحل بعد";
+      div.innerHTML =
+        '<div><strong>' + escapeHtml(s.subject) + "</strong>" +
+        '<div class="muted small">📝 ' + s.count + " سؤال • " + acc + "</div></div>" +
+        '<button class="btn btn-primary">ابدأ ▶️</button>';
+      div.querySelector("button").addEventListener("click", () => startQBankQuiz(s.subject));
+      box.appendChild(div);
+    });
+  }
+
+  function showQBankScreen(id) {
+    ["qbank-home", "qbank-quiz", "qbank-result"].forEach((s) => $(s).classList.add("hidden"));
+    $(id).classList.remove("hidden");
+  }
+
+  async function startQBankQuiz(subject) {
+    const data = await api("/api/qbank/quiz", {
+      method: "POST",
+      body: JSON.stringify({ subject, n: 10 }),
+    });
+    qb = { questions: data.questions, idx: 0, score: 0, answered: false, results: [] };
+    showQBankScreen("qbank-quiz");
+    renderQBankQuestion();
+  }
+
+  function renderQBankQuestion() {
+    const q = qb.questions[qb.idx];
+    qb.answered = false;
+    $("qbank-counter").textContent = "سؤال " + (qb.idx + 1) + " من " + qb.questions.length;
+    $("qbank-fill").style.width = Math.round((qb.idx / qb.questions.length) * 100) + "%";
+    $("qbank-source").textContent = q.source ? "📄 " + q.source : "";
+    $("qbank-question").textContent = q.question;
+    $("qbank-feedback").classList.add("hidden");
+    $("btn-qbank-next").classList.add("hidden");
+    $("btn-qbank-note-toggle").classList.add("hidden");
+    $("qbank-note-box").classList.add("hidden");
+    $("qbank-note").value = q.note || "";
+    const box = $("qbank-options");
+    box.innerHTML = "";
+    q.options.forEach((opt, i) => {
+      const b = document.createElement("button");
+      b.className = "btn qbank-opt";
+      b.textContent = opt;
+      b.addEventListener("click", () => answerQBank(i));
+      box.appendChild(b);
+    });
+  }
+
+  async function answerQBank(choice) {
+    if (qb.answered) return;
+    qb.answered = true;
+    const q = qb.questions[qb.idx];
+    const res = await api("/api/qbank/answer", {
+      method: "POST",
+      body: JSON.stringify({ question_id: q.id, choice }),
+    });
+    const buttons = document.querySelectorAll(".qbank-opt");
+    buttons.forEach((b, i) => {
+      b.disabled = true;
+      if (i === res.correct_idx) b.classList.add("opt-correct");
+      else if (i === choice) b.classList.add("opt-wrong");
+    });
+    const fb = $("qbank-feedback");
+    fb.classList.remove("hidden");
+    if (res.correct) {
+      qb.score += 1;
+      fb.innerHTML = "✅ <strong>إجابة صحيحة!</strong>";
+      fb.className = "qbank-feedback good";
+    } else {
+      fb.innerHTML = "❌ <strong>إجابة خاطئة.</strong> الصحيح هو الخيار رقم " + (res.correct_idx + 1);
+      fb.className = "qbank-feedback bad";
+    }
+    qb.results.push({ q, choice, correct: res.correct, correct_idx: res.correct_idx });
+    $("btn-qbank-next").classList.remove("hidden");
+    $("btn-qbank-next").textContent = qb.idx + 1 >= qb.questions.length ? "النتيجة 🏁" : "التالي ⏭️";
+    $("btn-qbank-note-toggle").classList.remove("hidden");
+    if (tg) tg.HapticFeedback.notificationOccurred(res.correct ? "success" : "error");
+  }
+
+  function renderQBankResult() {
+    showQBankScreen("qbank-result");
+    const total = qb.questions.length;
+    const pct = Math.round((qb.score / total) * 100);
+    $("qbank-fill").style.width = "100%";
+    let emoji = "🎉";
+    if (pct < 50) emoji = "💪";
+    else if (pct < 80) emoji = "👍";
+    $("qbank-score").innerHTML =
+      '<div class="score-big">' + emoji + " " + qb.score + " / " + total + "</div>" +
+      '<div class="muted">نسبة النجاح: ' + pct + "%</div>";
+    const rev = $("qbank-review");
+    rev.innerHTML = "";
+    qb.results.forEach((r, i) => {
+      const div = document.createElement("div");
+      div.className = "qbank-review-row " + (r.correct ? "good" : "bad");
+      div.innerHTML =
+        "<strong>" + (i + 1) + ". " + (r.correct ? "✅" : "❌") + "</strong> " +
+        escapeHtml(r.q.question.slice(0, 70)) + (r.q.question.length > 70 ? "…" : "");
+      rev.appendChild(div);
+    });
+  }
+
   /* ---------- الخطة الدراسية (طالب) ---------- */
   async function loadPlan() {
     const data = await api("/api/plans");
@@ -728,6 +846,35 @@
       if (tg) tg.showAlert("تعذّر الحفظ — تأكد أن الخطة تحوي يوماً واحداً على الأقل");
     }
   });
+
+  $("btn-qbank-next").addEventListener("click", () => {
+    qb.idx += 1;
+    if (qb.idx >= qb.questions.length) renderQBankResult();
+    else renderQBankQuestion();
+  });
+
+  $("btn-qbank-note-toggle").addEventListener("click", () => {
+    $("qbank-note-box").classList.toggle("hidden");
+  });
+
+  $("btn-qbank-note-save").addEventListener("click", async () => {
+    const q = qb.questions[qb.idx];
+    const note = $("qbank-note").value.trim();
+    await api("/api/qbank/notes/" + q.id, {
+      method: "PUT",
+      body: JSON.stringify({ note }),
+    });
+    q.note = note;
+    if (tg) tg.showAlert("تم حفظ ملاحظتك 📝");
+  });
+
+  $("btn-qbank-again").addEventListener("click", () => {
+    const subj = qb.questions.length ? qb.questions[0].subject : null;
+    if (subj) startQBankQuiz(subj);
+    else loadQBank();
+  });
+
+  $("btn-qbank-home").addEventListener("click", loadQBank);
 
   (async function init() {
     try {
