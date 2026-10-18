@@ -260,3 +260,28 @@ textarea { resize: vertical; line-height: 1.8; }
   padding: 10px 12px; font-size: .9rem; font-family: inherit; background: #fff;
 }
 .plan-block-tasks { resize: vertical; }
+
+/* ---------- بنك الأسئلة ---------- */
+.qbank-subject-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  background: var(--bg); border-radius: 12px; padding: 12px 14px; margin-bottom: 8px;
+}
+.qbank-progress { margin-bottom: 10px; }
+.qbank-source { font-size: .78rem; color: #888; margin-bottom: 6px; }
+.qbank-question { font-size: 1.05rem; font-weight: 700; line-height: 1.9; margin-bottom: 12px; }
+.qbank-options { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.qbank-opt { text-align: right; line-height: 1.8; }
+.qbank-opt:disabled { opacity: 1; cursor: default; }
+.qbank-opt.opt-correct { background: #d8f3dc; border: 2px solid #2e9e5b; }
+.qbank-opt.opt-wrong { background: #fde2e4; border: 2px solid #d90429; }
+.qbank-feedback { border-radius: 10px; padding: 10px 14px; margin-bottom: 10px; font-size: .92rem; }
+.qbank-feedback.good { background: #d8f3dc; }
+.qbank-feedback.bad { background: #fde2e4; }
+#qbank-note-box { margin: 10px 0; }
+#qbank-note { width: 100%; border: 1px solid #d5dbe5; border-radius: 10px; padding: 10px 12px; font-family: inherit; font-size: .9rem; }
+#btn-qbank-next { margin-top: 8px; }
+.qbank-score { text-align: center; margin: 12px 0; }
+.score-big { font-size: 2rem; font-weight: 800; }
+.qbank-review-row { padding: 8px 10px; border-radius: 8px; margin-bottom: 6px; font-size: .85rem; line-height: 1.7; }
+.qbank-review-row.good { background: #edf7ee; }
+.qbank-review-row.bad { background: #fdf0f0; }
