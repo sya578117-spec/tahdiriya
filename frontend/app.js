@@ -45,6 +45,7 @@
     if (name === "library") loadLibrary();
     if (name === "sessions") loadSessions();
     if (name === "tasks") loadChecklist();
+    if (name === "plan") loadPlan();
     if (name === "pomodoro") loadPomodoroStats();
     if (name === "quiz") loadQuiz();
     if (name === "motivation") loadMotivation();
@@ -406,6 +407,173 @@
       ". أكمل كل مهام اليوم لتمديد السلسلة!";
   }
 
+  /* ---------- الخطة الدراسية (طالب) ---------- */
+  async function loadPlan() {
+    const data = await api("/api/plans");
+    const box = $("plan-list");
+    box.innerHTML = "";
+    if (!data.semester) {
+      box.innerHTML = '<div class="card"><p class="muted">اختر فصلك الدراسي أولاً من /start لتظهر خطتك 📚</p></div>';
+      return;
+    }
+    if (!data.plans.length) {
+      box.innerHTML = '<div class="card"><p class="muted">لا توجد خطة دراسية مفعّلة بعد — تابعنا قريباً 🗓️</p></div>';
+      return;
+    }
+    data.plans.forEach((p) => box.appendChild(renderStudentPlan(p)));
+  }
+
+  function renderStudentPlan(p) {
+    const card = document.createElement("div");
+    card.className = "card";
+    const typeLabel = p.plan_type === "weekly" ? "أسبوعية" : "شهرية";
+    let html =
+      "<h2>🗓️ " + escapeHtml(p.title) + "</h2>" +
+      '<p class="muted small">خطة ' + typeLabel + "</p>" +
+      '<div class="progress-bar"><div class="progress-fill" id="plan-fill-' + p.id + '"></div></div>' +
+      '<div class="progress-text" id="plan-text-' + p.id + '"></div>' +
+      '<div class="plan-blocks">';
+    p.blocks.forEach((b, i) => {
+      const done = p.progress && p.progress[i];
+      html +=
+        '<div class="plan-block' + (done ? " done" : "") + '" data-plan="' + p.id + '" data-idx="' + i + '">' +
+        '<div class="plan-block-head"><span class="plan-block-label">' + escapeHtml(b.label || ("بلوك " + (i + 1))) + "</span>" +
+        '<span class="plan-check">' + (done ? "✅" : "⬜") + "</span></div>" +
+        '<ul class="plan-tasks">' +
+        b.tasks.map((t) => "<li>" + escapeHtml(t) + "</li>").join("") +
+        "</ul></div>";
+    });
+    html += "</div>";
+    card.innerHTML = html;
+    updatePlanProgressUI(p);
+    card.querySelectorAll(".plan-block").forEach((el) => {
+      el.addEventListener("click", async () => {
+        const planId = parseInt(el.dataset.plan, 10);
+        const idx = parseInt(el.dataset.idx, 10);
+        const nowDone = el.classList.contains("done");
+        const res = await api("/api/plans/" + planId + "/progress", {
+          method: "POST",
+          body: JSON.stringify({ block_idx: idx, done: !nowDone }),
+        });
+        p.progress = res.progress;
+        el.classList.toggle("done", !nowDone);
+        el.querySelector(".plan-check").textContent = !nowDone ? "✅" : "⬜";
+        updatePlanProgressUI({ ...p, done_count: res.done_count, total_count: res.total_count });
+        if (tg) tg.HapticFeedback.notificationOccurred("success");
+      });
+    });
+    return card;
+  }
+
+  function updatePlanProgressUI(p) {
+    const fill = $("plan-fill-" + p.id);
+    const txt = $("plan-text-" + p.id);
+    if (!fill || !txt) return;
+    const pct = p.total_count ? Math.round((p.done_count / p.total_count) * 100) : 0;
+    fill.style.width = pct + "%";
+    txt.textContent = "أنجزت " + p.done_count + " من " + p.total_count + " (" + pct + "%)";
+  }
+
+  /* ---------- الخطط الدراسية (أدمن) ---------- */
+  const WEEK_DAYS = ["السبت", "الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة"];
+  const MONTH_WEEKS = ["الأسبوع الأول", "الأسبوع الثاني", "الأسبوع الثالث", "الأسبوع الرابع"];
+
+  function planBlockLabels(type) {
+    return type === "weekly" ? WEEK_DAYS : MONTH_WEEKS;
+  }
+
+  function renderPlanBlocksEditor(type, existing) {
+    const box = $("plan-blocks");
+    box.innerHTML = "";
+    planBlockLabels(type).forEach((label, i) => {
+      const wrap = document.createElement("div");
+      wrap.className = "plan-edit-block";
+      const tasks = existing && existing[i] ? existing[i].tasks.join("\n") : "";
+      wrap.innerHTML =
+        '<label class="fld-label">' + escapeHtml(label) + ' <span class="muted small">(كل سطر = مهمة)</span></label>' +
+        '<textarea class="plan-block-tasks" rows="3" data-label="' + escapeAttr(label) + '" placeholder="مثال: بيولوجيا — الفصل 3: الخلية">' +
+        escapeHtml(tasks) + "</textarea>";
+      box.appendChild(wrap);
+    });
+  }
+
+  function collectPlanBlocks() {
+    const blocks = [];
+    document.querySelectorAll(".plan-block-tasks").forEach((ta) => {
+      const tasks = ta.value.split("\n").map((t) => t.trim()).filter(Boolean);
+      blocks.push({ label: ta.dataset.label, tasks });
+    });
+    return blocks;
+  }
+
+  function resetPlanForm() {
+    $("plan-edit-id").value = "";
+    $("plan-form-title").textContent = "خطة جديدة";
+    $("plan-title").value = "";
+    $("plan-type").value = "weekly";
+    $("plan-semester").value = "both";
+    $("btn-plan-cancel").classList.add("hidden");
+    renderPlanBlocksEditor("weekly", null);
+  }
+
+  async function loadAdminPlans() {
+    const data = await api("/api/admin/plans");
+    const box = $("admin-plans-list");
+    box.innerHTML = "";
+    if (!data.plans.length) {
+      box.innerHTML = '<p class="muted small">لا توجد خطط بعد — أنشئ أول خطة 👇</p>';
+      return;
+    }
+    const typeName = { weekly: "أسبوعية", monthly: "شهرية" };
+    const semName = { sem1: "الفصل الأول", sem2: "الفصل الثاني", both: "كلا الفصلين" };
+    data.plans.forEach((p) => {
+      const div = document.createElement("div");
+      div.className = "plan-admin-row" + (p.is_active ? " active" : "");
+      div.innerHTML =
+        '<div class="plan-admin-info"><strong>' + escapeHtml(p.title) + "</strong>" +
+        '<div class="muted small">🗓️ ' + typeName[p.plan_type] + " • " + semName[p.semester] +
+        " • " + p.blocks.length + (p.plan_type === "weekly" ? " أيام" : " أسابيع") +
+        (p.is_active ? ' • <span class="badge-on">مفعّلة ✅</span>' : "") + "</div></div>" +
+        '<div class="plan-admin-actions"></div>';
+      const acts = div.querySelector(".plan-admin-actions");
+      const mkBtn = (label, cls, fn) => {
+        const b = document.createElement("button");
+        b.className = "btn " + cls;
+        b.textContent = label;
+        b.addEventListener("click", fn);
+        acts.appendChild(b);
+      };
+      if (!p.is_active) {
+        mkBtn("تفعيل ✅", "btn-primary", async () => {
+          await api("/api/admin/plans/" + p.id + "/activate", { method: "POST" });
+          loadAdminPlans();
+          if (tg) tg.showAlert("تم تفعيل الخطة 🗓️");
+        });
+      } else {
+        mkBtn("إيقاف ⏸️", "", async () => {
+          await api("/api/admin/plans/" + p.id + "/deactivate", { method: "POST" });
+          loadAdminPlans();
+        });
+      }
+      mkBtn("تعديل ✏️", "", () => {
+        $("plan-edit-id").value = p.id;
+        $("plan-form-title").textContent = "تعديل الخطة";
+        $("plan-title").value = p.title;
+        $("plan-type").value = p.plan_type;
+        $("plan-semester").value = p.semester;
+        $("btn-plan-cancel").classList.remove("hidden");
+        renderPlanBlocksEditor(p.plan_type, p.blocks);
+        $("plan-form-title").scrollIntoView({ behavior: "smooth" });
+      });
+      mkBtn("حذف 🗑️", "btn-del", async () => {
+        if (!confirm("حذف هذه الخطة نهائياً؟")) return;
+        await api("/api/admin/plans/" + p.id, { method: "DELETE" });
+        loadAdminPlans();
+      });
+      box.appendChild(div);
+    });
+  }
+
   /* ---------- الأدمن ---------- */
   async function loadAdmin() {
     const data = await api("/api/admin/overview");
@@ -439,6 +607,8 @@
       div.appendChild(del);
       sbox.appendChild(div);
     });
+    await loadAdminPlans();
+    if (!$("plan-blocks").children.length) renderPlanBlocksEditor("weekly", null);
   }
 
   /* ---------- أدوات ---------- */
@@ -524,6 +694,39 @@
     });
     $("admin-announce-text").value = "";
     if (tg) tg.showAlert("تم إرسال الإعلان إلى " + res.sent + " طالب 📢");
+  });
+
+  $("plan-type").addEventListener("change", () => {
+    renderPlanBlocksEditor($("plan-type").value, null);
+  });
+
+  $("btn-plan-cancel").addEventListener("click", resetPlanForm);
+
+  $("btn-plan-save").addEventListener("click", async () => {
+    const title = $("plan-title").value.trim();
+    if (!title) {
+      if (tg) tg.showAlert("اكتب عنوان الخطة أولاً ✏️");
+      return;
+    }
+    const payload = {
+      title,
+      plan_type: $("plan-type").value,
+      semester: $("plan-semester").value,
+      blocks: collectPlanBlocks(),
+    };
+    const editId = $("plan-edit-id").value;
+    try {
+      if (editId) {
+        await api("/api/admin/plans/" + editId, { method: "PUT", body: JSON.stringify(payload) });
+      } else {
+        await api("/api/admin/plans", { method: "POST", body: JSON.stringify(payload) });
+      }
+      resetPlanForm();
+      loadAdminPlans();
+      if (tg) tg.showAlert("تم حفظ الخطة 🗓️ — فعّلها لتظهر للطلاب");
+    } catch (e) {
+      if (tg) tg.showAlert("تعذّر الحفظ — تأكد أن الخطة تحوي يوماً واحداً على الأقل");
+    }
   });
 
   (async function init() {
