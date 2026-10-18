@@ -111,6 +111,26 @@ CREATE TABLE IF NOT EXISTS personal_reminders (
     enabled  INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL
 );
+-- الخطط الدراسية (أسبوعية/شهرية) التي يضيفها الأدمن
+CREATE TABLE IF NOT EXISTS study_plans (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    title      TEXT NOT NULL,
+    plan_type  TEXT NOT NULL,                -- weekly | monthly
+    semester   TEXT NOT NULL DEFAULT 'both',-- sem1 | sem2 | both
+    blocks     TEXT NOT NULL DEFAULT '[]',   -- JSON: [{label, tasks:[str]}]
+    is_active  INTEGER NOT NULL DEFAULT 0,
+    created_by INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+-- تقدم الطالب في الخطة (بلوك منجز/غير منجز)
+CREATE TABLE IF NOT EXISTS plan_progress (
+    plan_id   INTEGER NOT NULL,
+    user_id   INTEGER NOT NULL,
+    block_idx INTEGER NOT NULL,
+    done      INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (plan_id, user_id, block_idx)
+);
+CREATE INDEX IF NOT EXISTS idx_plans_active ON study_plans(is_active, semester, plan_type);
 """
 
 
@@ -543,3 +563,138 @@ class Database:
         rows = await cur.fetchall()
         return [{"id": r[0], "user_id": r[1], "label": r[2], "time": r[3]}
                 for r in rows]
+
+    # ---------- الخطط الدراسية ----------
+    @staticmethod
+    def _plan_row(r) -> dict:
+        import json as _json
+        try:
+            blocks = _json.loads(r[4] or "[]")
+        except Exception:  # noqa: BLE001
+            blocks = []
+        return {"id": r[0], "title": r[1], "plan_type": r[2], "semester": r[3],
+                "blocks": blocks, "is_active": bool(r[5]),
+                "created_by": r[6], "created_at": r[7]}
+
+    async def create_plan(self, title: str, plan_type: str, semester: str,
+                          blocks: list, created_by: int) -> int:
+        import json as _json
+        async with self._lock:
+            assert self._conn is not None
+            cur = await self._conn.execute(
+                "INSERT INTO study_plans (title, plan_type, semester, blocks, created_by, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (title, plan_type, semester, _json.dumps(blocks, ensure_ascii=False),
+                 created_by, damascus_now().isoformat()),
+            )
+            await self._conn.commit()
+            return int(cur.lastrowid)
+
+    async def list_plans(self) -> list[dict]:
+        assert self._conn is not None
+        cur = await self._conn.execute(
+            "SELECT id, title, plan_type, semester, blocks, is_active, created_by, created_at"
+            " FROM study_plans ORDER BY created_at DESC"
+        )
+        return [self._plan_row(r) for r in await cur.fetchall()]
+
+    async def get_plan(self, plan_id: int) -> dict | None:
+        assert self._conn is not None
+        cur = await self._conn.execute(
+            "SELECT id, title, plan_type, semester, blocks, is_active, created_by, created_at"
+            " FROM study_plans WHERE id = ?",
+            (plan_id,),
+        )
+        row = await cur.fetchone()
+        return self._plan_row(row) if row else None
+
+    async def update_plan(self, plan_id: int, title: str, plan_type: str,
+                          semester: str, blocks: list) -> bool:
+        import json as _json
+        async with self._lock:
+            assert self._conn is not None
+            cur = await self._conn.execute(
+                "UPDATE study_plans SET title = ?, plan_type = ?, semester = ?, blocks = ?"
+                " WHERE id = ?",
+                (title, plan_type, semester, _json.dumps(blocks, ensure_ascii=False),
+                 plan_id),
+            )
+            await self._conn.commit()
+            return cur.rowcount > 0
+
+    async def delete_plan(self, plan_id: int) -> bool:
+        async with self._lock:
+            assert self._conn is not None
+            await self._conn.execute("DELETE FROM plan_progress WHERE plan_id = ?",
+                                     (plan_id,))
+            cur = await self._conn.execute("DELETE FROM study_plans WHERE id = ?",
+                                           (plan_id,))
+            await self._conn.commit()
+            return cur.rowcount > 0
+
+    async def activate_plan(self, plan_id: int) -> bool:
+        """تفعيل خطة وإلغاء تفعيل الخطط الأخرى من نفس النوع والفصل."""
+        async with self._lock:
+            assert self._conn is not None
+            cur = await self._conn.execute(
+                "SELECT plan_type, semester FROM study_plans WHERE id = ?", (plan_id,))
+            row = await cur.fetchone()
+            if not row:
+                return False
+            ptype, sem = row[0], row[1]
+            await self._conn.execute(
+                "UPDATE study_plans SET is_active = 0 WHERE plan_type = ? AND semester = ?",
+                (ptype, sem),
+            )
+            await self._conn.execute(
+                "UPDATE study_plans SET is_active = 1 WHERE id = ?", (plan_id,))
+            await self._conn.commit()
+            return True
+
+    async def deactivate_plan(self, plan_id: int) -> bool:
+        async with self._lock:
+            assert self._conn is not None
+            cur = await self._conn.execute(
+                "UPDATE study_plans SET is_active = 0 WHERE id = ?", (plan_id,))
+            await self._conn.commit()
+            return cur.rowcount > 0
+
+    async def active_plans(self, semester: str | None) -> list[dict]:
+        assert self._conn is not None
+        if semester in ("sem1", "sem2"):
+            cur = await self._conn.execute(
+                "SELECT id, title, plan_type, semester, blocks, is_active, created_by, created_at"
+                " FROM study_plans WHERE is_active = 1"
+                " AND (semester = 'both' OR semester = ?)"
+                " ORDER BY plan_type",
+                (semester,),
+            )
+        else:
+            cur = await self._conn.execute(
+                "SELECT id, title, plan_type, semester, blocks, is_active, created_by, created_at"
+                " FROM study_plans WHERE is_active = 1 AND semester = 'both'"
+                " ORDER BY plan_type"
+            )
+        return [self._plan_row(r) for r in await cur.fetchall()]
+
+    async def set_plan_progress(self, plan_id: int, user_id: int,
+                                block_idx: int, done: bool) -> dict:
+        async with self._lock:
+            assert self._conn is not None
+            await self._conn.execute(
+                "INSERT INTO plan_progress (plan_id, user_id, block_idx, done)"
+                " VALUES (?, ?, ?, ?)"
+                " ON CONFLICT (plan_id, user_id, block_idx)"
+                " DO UPDATE SET done = excluded.done",
+                (plan_id, user_id, block_idx, 1 if done else 0),
+            )
+            await self._conn.commit()
+        return await self.get_plan_progress(plan_id, user_id)
+
+    async def get_plan_progress(self, plan_id: int, user_id: int) -> dict:
+        assert self._conn is not None
+        cur = await self._conn.execute(
+            "SELECT block_idx, done FROM plan_progress WHERE plan_id = ? AND user_id = ?",
+            (plan_id, user_id),
+        )
+        return {r[0]: bool(r[1]) for r in await cur.fetchall()}
