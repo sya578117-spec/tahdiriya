@@ -363,6 +363,12 @@ class Database:
             await self._conn.commit()
             return cur.rowcount > 0
 
+    async def file_id_exists(self, file_id: str) -> bool:
+        assert self._conn is not None
+        cur = await self._conn.execute(
+            "SELECT 1 FROM library_files WHERE file_id = ? LIMIT 1", (file_id,))
+        return await cur.fetchone() is not None
+
     async def search_library(self, subject: str | None = None,
                              file_type: str | None = None,
                              query: str | None = None,
