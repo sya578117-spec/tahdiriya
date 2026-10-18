@@ -482,6 +482,78 @@ async def api_plan_progress(plan_id: int, body: PlanProgressIn,
     return {"ok": True, "progress": progress, "done_count": done, "total_count": total}
 
 
+# ---------- بنك الأسئلة التفاعلي ----------
+class QuizStartIn(BaseModel):
+    subject: str
+    n: int = 10
+
+
+class QuizAnswerApiIn(BaseModel):
+    question_id: int
+    choice: int
+
+
+class NoteIn(BaseModel):
+    note: str = ""
+
+
+class QBankImportIn(BaseModel):
+    questions: list  # [{subject, question, options:[], correct:int, source}]
+
+
+@app.get("/api/qbank/subjects")
+async def api_qbank_subjects(user: dict = Depends(tg_user)):
+    subjects = await db.qbank_subjects()
+    stats = {s["subject"]: s for s in await db.qbank_stats(user["id"])}
+    for s in subjects:
+        st = stats.get(s["subject"], {})
+        s["answered"] = st.get("answered", 0)
+        s["correct"] = st.get("correct", 0)
+    return {"subjects": subjects}
+
+
+@app.post("/api/qbank/quiz")
+async def api_qbank_quiz(body: QuizStartIn, user: dict = Depends(tg_user)):
+    subject = body.subject.strip()
+    if not subject:
+        raise HTTPException(status_code=400, detail="اختر المادة")
+    questions = await db.qbank_random(subject, body.n)
+    if not questions:
+        raise HTTPException(status_code=404, detail="لا توجد أسئلة لهذه المادة بعد")
+    for q in questions:
+        q["note"] = await db.qbank_note_get(q["id"], user["id"])
+    return {"questions": questions}
+
+
+@app.post("/api/qbank/answer")
+async def api_qbank_answer(body: QuizAnswerApiIn, user: dict = Depends(tg_user)):
+    res = await db.qbank_answer(body.question_id, user["id"], body.choice)
+    if not res:
+        raise HTTPException(status_code=404, detail="السؤال غير موجود")
+    return res
+
+
+@app.get("/api/qbank/notes/{qid}")
+async def api_qbank_note_get(qid: int, user: dict = Depends(tg_user)):
+    return {"note": await db.qbank_note_get(qid, user["id"])}
+
+
+@app.put("/api/qbank/notes/{qid}")
+async def api_qbank_note_set(qid: int, body: NoteIn, user: dict = Depends(tg_user)):
+    note = (body.note or "").strip()[:2000]
+    await db.qbank_note_set(qid, user["id"], note)
+    return {"ok": True}
+
+
+@app.post("/api/admin/qbank/import")
+async def api_admin_qbank_import(body: QBankImportIn, user: dict = Depends(tg_user)):
+    require_admin(user)
+    if not isinstance(body.questions, list) or len(body.questions) > 2000:
+        raise HTTPException(status_code=400, detail="قائمة الأسئلة غير صالحة")
+    n = await db.qbank_import(body.questions)
+    return {"ok": True, "imported": n}
+
+
 @app.get("/api/admin/library/export-ids")
 async def api_admin_export_ids(user: dict = Depends(tg_user)):
     """تصدير file_id للملفات (للنسخ الاحتياطي والاستيراد الخارجي) — أدمن فقط."""
