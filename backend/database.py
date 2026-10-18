@@ -131,6 +131,35 @@ CREATE TABLE IF NOT EXISTS plan_progress (
     UNIQUE (plan_id, user_id, block_idx)
 );
 CREATE INDEX IF NOT EXISTS idx_plans_active ON study_plans(is_active, semester, plan_type);
+-- بنك الأسئلة التفاعلي (مستخرج من ملفات الدورات)
+CREATE TABLE IF NOT EXISTS question_bank (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    subject    TEXT NOT NULL,
+    question   TEXT NOT NULL,
+    options    TEXT NOT NULL,                -- JSON: ["خيار1", ...]
+    correct    INTEGER NOT NULL,             -- فهرس الإجابة الصحيحة (0-based)
+    source     TEXT NOT NULL DEFAULT '',     -- مثال: دورة 2025
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_qb_subject ON question_bank(subject);
+-- ملاحظات الطالب الخاصة على الأسئلة
+CREATE TABLE IF NOT EXISTS question_notes (
+    question_id INTEGER NOT NULL,
+    user_id     INTEGER NOT NULL,
+    note        TEXT NOT NULL DEFAULT '',
+    updated_at  TEXT NOT NULL,
+    UNIQUE (question_id, user_id)
+);
+-- محاولات الطالب (للإحصائيات)
+CREATE TABLE IF NOT EXISTS question_attempts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    question_id INTEGER NOT NULL,
+    user_id     INTEGER NOT NULL,
+    choice      INTEGER NOT NULL,
+    is_correct  INTEGER NOT NULL,
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_qa_user ON question_attempts(user_id);
 """
 
 
@@ -711,3 +740,108 @@ class Database:
             (plan_id, user_id),
         )
         return {r[0]: bool(r[1]) for r in await cur.fetchall()}
+
+    # ---------- بنك الأسئلة ----------
+    async def qbank_import(self, questions: list[dict]) -> int:
+        """استيراد جماعي لأسئلة — يعيد عدد المُدخَل."""
+        import json as _json
+        n = 0
+        async with self._lock:
+            assert self._conn is not None
+            for q in questions:
+                opts = q.get("options") or []
+                if not q.get("question") or len(opts) < 2:
+                    continue
+                correct = int(q.get("correct", 0))
+                if not (0 <= correct < len(opts)):
+                    continue
+                await self._conn.execute(
+                    "INSERT INTO question_bank (subject, question, options, correct, source, created_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?)",
+                    (str(q.get("subject", "")), str(q["question"]),
+                     _json.dumps(opts, ensure_ascii=False), correct,
+                     str(q.get("source", "")), damascus_now().isoformat()),
+                )
+                n += 1
+            await self._conn.commit()
+        return n
+
+    async def qbank_subjects(self) -> list[dict]:
+        assert self._conn is not None
+        cur = await self._conn.execute(
+            "SELECT subject, COUNT(*) FROM question_bank GROUP BY subject ORDER BY subject")
+        return [{"subject": r[0], "count": r[1]} for r in await cur.fetchall()]
+
+    async def qbank_random(self, subject: str, n: int) -> list[dict]:
+        import json as _json
+        assert self._conn is not None
+        cur = await self._conn.execute(
+            "SELECT id, subject, question, options, source FROM question_bank"
+            " WHERE subject = ? ORDER BY RANDOM() LIMIT ?",
+            (subject, max(1, min(n, 50))),
+        )
+        out = []
+        for r in await cur.fetchall():
+            out.append({"id": r[0], "subject": r[1], "question": r[2],
+                        "options": _json.loads(r[3]), "source": r[4]})
+        return out
+
+    async def qbank_get(self, qid: int) -> dict | None:
+        import json as _json
+        assert self._conn is not None
+        cur = await self._conn.execute(
+            "SELECT id, subject, question, options, correct, source FROM question_bank WHERE id = ?",
+            (qid,),
+        )
+        r = await cur.fetchone()
+        if not r:
+            return None
+        return {"id": r[0], "subject": r[1], "question": r[2],
+                "options": _json.loads(r[3]), "correct": r[4], "source": r[5]}
+
+    async def qbank_answer(self, qid: int, user_id: int, choice: int) -> dict | None:
+        q = await self.qbank_get(qid)
+        if not q or not (0 <= choice < len(q["options"])):
+            return None
+        is_correct = 1 if choice == q["correct"] else 0
+        async with self._lock:
+            assert self._conn is not None
+            await self._conn.execute(
+                "INSERT INTO question_attempts (question_id, user_id, choice, is_correct, created_at)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (qid, user_id, choice, is_correct, damascus_now().isoformat()),
+            )
+            await self._conn.commit()
+        return {"correct": bool(is_correct), "correct_idx": q["correct"]}
+
+    async def qbank_note_get(self, qid: int, user_id: int) -> str:
+        assert self._conn is not None
+        cur = await self._conn.execute(
+            "SELECT note FROM question_notes WHERE question_id = ? AND user_id = ?",
+            (qid, user_id),
+        )
+        r = await cur.fetchone()
+        return r[0] if r else ""
+
+    async def qbank_note_set(self, qid: int, user_id: int, note: str) -> None:
+        async with self._lock:
+            assert self._conn is not None
+            await self._conn.execute(
+                "INSERT INTO question_notes (question_id, user_id, note, updated_at)"
+                " VALUES (?, ?, ?, ?)"
+                " ON CONFLICT (question_id, user_id) DO UPDATE SET note = excluded.note,"
+                " updated_at = excluded.updated_at",
+                (qid, user_id, note, damascus_now().isoformat()),
+            )
+            await self._conn.commit()
+
+    async def qbank_stats(self, user_id: int) -> list[dict]:
+        assert self._conn is not None
+        cur = await self._conn.execute(
+            "SELECT b.subject, COUNT(*), SUM(a.is_correct) FROM question_attempts a"
+            " JOIN question_bank b ON b.id = a.question_id"
+            " WHERE a.user_id = ? GROUP BY b.subject",
+            (user_id,),
+        )
+        return [{"subject": r[0], "answered": r[1], "correct": r[2] or 0}
+                for r in await cur.fetchall()]
