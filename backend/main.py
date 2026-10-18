@@ -358,6 +358,130 @@ async def api_delete_reminder(reminder_id: int, request: Request,
 
 
 # ---------- إدارة (أدمن فقط) ----------
+# ---------- الخطط الدراسية ----------
+_PLAN_TYPES = {"weekly", "monthly"}
+_PLAN_SEMESTERS = {"sem1", "sem2", "both"}
+
+
+def _clean_blocks(blocks) -> list:
+    """تنظيف بلوكات الخطة: [{label, tasks:[str]}] بحد أقصى 31 بلوك و20 مهمة للبلوك."""
+    if not isinstance(blocks, list):
+        raise HTTPException(status_code=400, detail="صيغة البلوكات غير صالحة")
+    out = []
+    for b in blocks[:31]:
+        if not isinstance(b, dict):
+            continue
+        label = str(b.get("label") or "").strip()[:60]
+        tasks = b.get("tasks") or []
+        if isinstance(tasks, str):
+            tasks = [t.strip() for t in tasks.splitlines() if t.strip()]
+        clean_tasks = [str(t).strip()[:300] for t in tasks if str(t).strip()][:20]
+        if label or clean_tasks:
+            out.append({"label": label, "tasks": clean_tasks})
+    if not out:
+        raise HTTPException(status_code=400, detail="الخطة فارغة — أضف يوماً/أسبوعاً واحداً على الأقل")
+    return out
+
+
+class PlanIn(BaseModel):
+    title: str
+    plan_type: str  # weekly | monthly
+    semester: str = "both"  # sem1 | sem2 | both
+    blocks: list
+
+
+class PlanProgressIn(BaseModel):
+    block_idx: int
+    done: bool
+
+
+@app.get("/api/plans")
+async def api_get_plans(user: dict = Depends(tg_user)):
+    me = await db.get_or_create_user(user["id"], user.get("username"))
+    plans = await db.active_plans(me["semester"])
+    result = []
+    for p in plans:
+        progress = await db.get_plan_progress(p["id"], user["id"])
+        total = len(p["blocks"])
+        done = sum(1 for i in range(total) if progress.get(i))
+        result.append({**p, "progress": progress,
+                       "done_count": done, "total_count": total})
+    return {"plans": result, "semester": me["semester"]}
+
+
+@app.get("/api/admin/plans")
+async def api_admin_list_plans(user: dict = Depends(tg_user)):
+    require_admin(user)
+    return {"plans": await db.list_plans()}
+
+
+@app.post("/api/admin/plans")
+async def api_admin_create_plan(body: PlanIn, user: dict = Depends(tg_user)):
+    require_admin(user)
+    title = body.title.strip()[:120]
+    if not title:
+        raise HTTPException(status_code=400, detail="عنوان الخطة مطلوب")
+    if body.plan_type not in _PLAN_TYPES:
+        raise HTTPException(status_code=400, detail="نوع الخطة غير صالح")
+    if body.semester not in _PLAN_SEMESTERS:
+        raise HTTPException(status_code=400, detail="الفصل غير صالح")
+    blocks = _clean_blocks(body.blocks)
+    pid = await db.create_plan(title, body.plan_type, body.semester, blocks, user["id"])
+    return {"ok": True, "id": pid}
+
+
+@app.put("/api/admin/plans/{plan_id}")
+async def api_admin_update_plan(plan_id: int, body: PlanIn, user: dict = Depends(tg_user)):
+    require_admin(user)
+    title = body.title.strip()[:120]
+    if not title:
+        raise HTTPException(status_code=400, detail="عنوان الخطة مطلوب")
+    if body.plan_type not in _PLAN_TYPES:
+        raise HTTPException(status_code=400, detail="نوع الخطة غير صالح")
+    if body.semester not in _PLAN_SEMESTERS:
+        raise HTTPException(status_code=400, detail="الفصل غير صالح")
+    blocks = _clean_blocks(body.blocks)
+    ok = await db.update_plan(plan_id, title, body.plan_type, body.semester, blocks)
+    if not ok:
+        raise HTTPException(status_code=404, detail="الخطة غير موجودة")
+    return {"ok": True}
+
+
+@app.post("/api/admin/plans/{plan_id}/activate")
+async def api_admin_activate_plan(plan_id: int, user: dict = Depends(tg_user)):
+    require_admin(user)
+    ok = await db.activate_plan(plan_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="الخطة غير موجودة")
+    return {"ok": True}
+
+
+@app.post("/api/admin/plans/{plan_id}/deactivate")
+async def api_admin_deactivate_plan(plan_id: int, user: dict = Depends(tg_user)):
+    require_admin(user)
+    return {"ok": await db.deactivate_plan(plan_id)}
+
+
+@app.delete("/api/admin/plans/{plan_id}")
+async def api_admin_delete_plan(plan_id: int, user: dict = Depends(tg_user)):
+    require_admin(user)
+    return {"ok": await db.delete_plan(plan_id)}
+
+
+@app.post("/api/plans/{plan_id}/progress")
+async def api_plan_progress(plan_id: int, body: PlanProgressIn,
+                            user: dict = Depends(tg_user)):
+    plan = await db.get_plan(plan_id)
+    if not plan or not plan["is_active"]:
+        raise HTTPException(status_code=404, detail="الخطة غير موجودة أو غير مفعّلة")
+    if not (0 <= body.block_idx < len(plan["blocks"])):
+        raise HTTPException(status_code=400, detail="رقم البلوك غير صالح")
+    progress = await db.set_plan_progress(plan_id, user["id"], body.block_idx, body.done)
+    total = len(plan["blocks"])
+    done = sum(1 for i in range(total) if progress.get(i))
+    return {"ok": True, "progress": progress, "done_count": done, "total_count": total}
+
+
 @app.get("/api/admin/overview")
 async def api_admin_overview(user: dict = Depends(tg_user)):
     require_admin(user)
