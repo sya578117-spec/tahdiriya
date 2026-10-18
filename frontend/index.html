@@ -165,6 +165,38 @@
           </div>
         </div>
 
+        <!-- بنك الأسئلة -->
+        <div class="tab-pane hidden" id="pane-qbank">
+          <div class="card" id="qbank-home">
+            <h2>📝 بنك الأسئلة</h2>
+            <p class="muted small">أسئلة الدورات الامتحانية — حلّ مباشرة وشوف الصح والخطأ فوراً.</p>
+            <div id="qbank-subjects"></div>
+          </div>
+          <div class="card hidden" id="qbank-quiz">
+            <div class="qbank-progress">
+              <div class="progress-bar"><div class="progress-fill" id="qbank-fill"></div></div>
+              <div class="progress-text" id="qbank-counter"></div>
+            </div>
+            <div class="qbank-source" id="qbank-source"></div>
+            <div class="qbank-question" id="qbank-question"></div>
+            <div class="qbank-options" id="qbank-options"></div>
+            <div class="qbank-feedback hidden" id="qbank-feedback"></div>
+            <button class="btn hidden" id="btn-qbank-note-toggle">📝 ملاحظتي</button>
+            <div class="hidden" id="qbank-note-box">
+              <textarea id="qbank-note" rows="2" maxlength="2000" placeholder="اكتب ملاحظتك على هذا السؤال…"></textarea>
+              <button class="btn btn-primary" id="btn-qbank-note-save">حفظ الملاحظة 💾</button>
+            </div>
+            <button class="btn btn-primary hidden" id="btn-qbank-next">التالي ⏭️</button>
+          </div>
+          <div class="card hidden" id="qbank-result">
+            <h2>🏁 نتيجة الاختبار</h2>
+            <div class="qbank-score" id="qbank-score"></div>
+            <div id="qbank-review"></div>
+            <button class="btn btn-primary" id="btn-qbank-again">اختبار جديد 🔄</button>
+            <button class="btn" id="btn-qbank-home">المواد 📚</button>
+          </div>
+        </div>
+
         <!-- الخطة الدراسية -->
         <div class="tab-pane hidden" id="pane-plan">
           <div id="plan-list"></div>
@@ -232,6 +264,7 @@
         <button class="tab" data-tab="sessions">📅<span>الحصص</span></button>
         <button class="tab" data-tab="tasks">✅<span>المهام</span></button>
         <button class="tab" data-tab="plan">🗓️<span>الخطة</span></button>
+        <button class="tab" data-tab="qbank">📝<span>الأسئلة</span></button>
         <button class="tab" data-tab="pomodoro">🍅<span>تركيز</span></button>
         <button class="tab" data-tab="quiz">❓<span>اختبار</span></button>
         <button class="tab" data-tab="motivation">💡<span>تحفيز</span></button>
