@@ -246,6 +246,20 @@ async def api_countdown(user: dict = Depends(tg_user)):
     return next_milestone()
 
 
+@app.get("/api/_diag")
+async def api_diag():
+    """تشخيص داخلي: هل البوت يعمل؟ (لا يعرض أسراراً)"""
+    bot_app = getattr(app.state, "bot_app", None)
+    updater = getattr(bot_app, "updater", None) if bot_app else None
+    return {
+        "bot_token_set": bool(config.BOT_TOKEN),
+        "webapp_url": config.WEBAPP_URL or None,
+        "bot_app_exists": bot_app is not None,
+        "updater_running": bool(updater and updater.running),
+        "admin_ids": config.ADMIN_IDS,
+    }
+
+
 @app.get("/api/announcements")
 async def api_announcements(user: dict = Depends(tg_user)):
     return {"items": await db.latest_announcements()}
