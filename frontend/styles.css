@@ -230,3 +230,33 @@ textarea { resize: vertical; line-height: 1.8; }
   border-right: 3px solid var(--accent);
 }
 .small { font-size: .78rem; }
+
+/* ---------- الخطة الدراسية ---------- */
+.plan-blocks { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.plan-block {
+  background: var(--bg); border-radius: 12px; padding: 12px 14px;
+  border-right: 3px solid var(--accent); cursor: pointer; user-select: none;
+}
+.plan-block.done { opacity: .72; border-right-color: #2e9e5b; }
+.plan-block-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.plan-block-label { font-weight: 700; }
+.plan-check { font-size: 1.1rem; }
+.plan-tasks { margin: 0; padding-right: 18px; font-size: .9rem; line-height: 1.9; }
+.plan-block.done .plan-tasks { text-decoration: line-through; }
+.plan-admin-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  background: var(--bg); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px;
+}
+.plan-admin-row.active { border: 1px solid #2e9e5b; }
+.plan-admin-info { flex: 1; }
+.plan-admin-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.badge-on { color: #2e9e5b; font-weight: 700; }
+.plan-edit-block { margin-bottom: 10px; }
+.fld-label { display: block; font-size: .82rem; font-weight: 700; margin: 10px 0 4px; }
+.form-row { display: flex; gap: 10px; margin: 8px 0; }
+.form-row > div { flex: 1; }
+#plan-title, #plan-type, #plan-semester, .plan-block-tasks {
+  width: 100%; border: 1px solid #d5dbe5; border-radius: 10px;
+  padding: 10px 12px; font-size: .9rem; font-family: inherit; background: #fff;
+}
+.plan-block-tasks { resize: vertical; }
