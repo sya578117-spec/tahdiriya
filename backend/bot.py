@@ -43,6 +43,7 @@ MAIN_MENU_TEXT = (
 AF_FILE, AF_SUBJECT, AF_TYPE, AF_SOURCE = range(4)
 AS_TITLE, AS_SUBJECT, AS_DATETIME, AS_LINK = range(4, 8)
 AN_TEXT, AN_CONFIRM = range(8, 10)
+BF_FILES, BF_CONFIRM = range(10, 12)
 
 
 def webapp_keyboard() -> ReplyKeyboardMarkup:
@@ -158,6 +159,7 @@ def _admin_only(func):
 async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("📁 إضافة ملف للمكتبة", callback_data="admin:addfile")],
+        [InlineKeyboardButton("📥 استيراد جماعي (تصنيف تلقائي)", callback_data="admin:bulk")],
         [InlineKeyboardButton("📅 جدولة حصة دراسية", callback_data="admin:addsession")],
         [InlineKeyboardButton("📢 إرسال إعلان", callback_data="admin:announce")],
         [InlineKeyboardButton("📊 إحصائيات", callback_data="admin:stats")],
@@ -200,6 +202,149 @@ async def on_admin_button(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await query.message.reply_text("\n".join(lines), parse_mode="Markdown")
         return None
     return None
+
+
+# ----- الاستيراد الجماعي: تصنيف تلقائي من اسم الملف والكابشن -----
+# (المادة, كلمات مفتاحية بالعربية/الإنجليزية كما تظهر في قنوات الدورات)
+SUBJECT_KEYWORDS: list[tuple[str, list[str]]] = [
+    ("الفيزيولوجيا (علم وظائف الأعضاء)", ["فيزيولوجيا", "فيزيو", "physio"]),
+    ("التشريح العام", ["تشريح", "anatomy"]),
+    ("البيولوجيا (علم الخلية)", ["بيولوجيا", "بيو", "biology"]),
+    ("الفيزياء الطبية", ["فيزياء", "physics"]),
+    ("الكيمياء الطبية", ["كيمياء", "chemistry", "chemi"]),
+    ("تاريخ الطب", ["تاريخ", "history"]),
+    ("اللغة الإنجليزية 1", ["انكليزي1", "انكليزية1", "eng1", "english1"]),
+    ("اللغة الإنجليزية 2", ["انكليزي2", "انكليزية2", "eng2", "english2",
+                             "انكليزي", "انكليزية", "english"]),
+    ("الوراثة الطبية", ["وراثة", "وراثه", "genetics"]),
+    ("الإحصاء الطبي", ["احصاء", "إحصاء", "statistics", "stat"]),
+]
+
+_TYPE_KEYWORDS: list[tuple[str, list[str]]] = [
+    ("سلالم تصحيح", ["سلم", "تصحيح", "answer key", "answers"]),
+    ("نوط وملخصات", ["نوط", "ملخص", "تلخيص", "summary", "نوطة"]),
+    ("كتب ومقررات", ["كتاب", "مقرر", "book"]),
+]
+
+
+def autoclassify_file(file_name: str, caption: str) -> dict:
+    """تصنيف تلقائي: يعيد {subject|None, file_type, source}."""
+    import re
+    text = f"{file_name or ''} {caption or ''}".lower()
+    subject = None
+    for subj, kws in SUBJECT_KEYWORDS:
+        if any(k in text for k in kws):
+            subject = subj
+            break
+    file_type = "أسئلة دورات"  # الافتراضي لقنوات الدورات
+    for ftype, kws in _TYPE_KEYWORDS:
+        if any(k in text for k in kws):
+            file_type = ftype
+            break
+    m = re.search(r"(20\d{2})", text)
+    source = f"دورة {m.group(1)}" if m else ""
+    return {"subject": subject, "file_type": file_type, "source": source}
+
+
+async def bulk_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    assert query is not None
+    await query.answer()
+    if not _is_admin(query.from_user.id):
+        return ConversationHandler.END
+    context.user_data["bulk_files"] = []
+    await query.message.reply_text(
+        "📥 *وضع الاستيراد الجماعي*\n\n"
+        "أرسل أو حوّل الملفات الآن (PDF/صور) — يمكنك تحويل عشرات الملفات دفعة واحدة.\n"
+        "سأصنّفها تلقائياً حسب الاسم والكابشن.\n\n"
+        "عند الانتهاء أرسل كلمة: *تم*",
+        parse_mode="Markdown",
+    )
+    return BF_FILES
+
+
+async def bf_got_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    msg = update.message
+    assert msg is not None
+    doc = msg.document or (msg.photo[-1] if msg.photo else None)
+    if doc is None:
+        return BF_FILES
+    file_name = getattr(doc, "file_name", None) or "ملف"
+    caption = msg.caption or ""
+    cls = autoclassify_file(file_name, caption)
+    context.user_data.setdefault("bulk_files", []).append({
+        "file_id": doc.file_id,
+        "file_name": file_name,
+        "mime_type": getattr(doc, "mime_type", None) or "",
+        "file_size": getattr(doc, "file_size", 0) or 0,
+        **cls,
+    })
+    n = len(context.user_data["bulk_files"])
+    if n % 25 == 0:
+        await msg.reply_text(f"📥 استلمت {n} ملف حتى الآن…")
+    return BF_FILES
+
+
+async def bf_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    msg = update.message
+    assert msg is not None
+    files = context.user_data.get("bulk_files", [])
+    if not files:
+        await msg.reply_text("لم أستلم أي ملف. حوّل الملفات أولاً ثم أرسل «تم».")
+        return BF_FILES
+    from collections import Counter
+    by_subject = Counter(f["subject"] or "❓ غير مصنف" for f in files)
+    lines = [f"📥 استلمت *{len(files)}* ملف — التصنيف التلقائي:"]
+    for subj, cnt in by_subject.most_common():
+        lines.append(f"• {subj}: {cnt}")
+    unclassified = [f["file_name"] for f in files if not f["subject"]][:10]
+    if unclassified:
+        lines.append("\n⚠️ ملفات لم أتعرف على مادتها (ستُتجاهل عند التأكيد):")
+        lines += [f"– {name}" for name in unclassified]
+        if len([f for f in files if not f["subject"]]) > 10:
+            lines.append("…وغيرها")
+    lines.append("\nتأكيد الاستيراد؟")
+    await msg.reply_text(
+        "\n".join(lines), parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ تأكيد الاستيراد", callback_data="bf:yes"),
+            InlineKeyboardButton("❌ إلغاء", callback_data="bf:no"),
+        ]]),
+    )
+    return BF_CONFIRM
+
+
+async def bf_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    assert query is not None
+    await query.answer()
+    db: Database = context.bot_data["db"]
+    if query.data == "bf:no" or not _is_admin(query.from_user.id):
+        context.user_data.pop("bulk_files", None)
+        await query.message.reply_text("تم إلغاء الاستيراد 🗑️")
+        return ConversationHandler.END
+    files = context.user_data.pop("bulk_files", [])
+    added, skipped_dup, skipped_nosubj = 0, 0, []
+    for f in files:
+        if not f["subject"]:
+            skipped_nosubj.append(f["file_name"])
+            continue
+        if await db.file_id_exists(f["file_id"]):
+            skipped_dup += 1
+            continue
+        await db.add_library_file(
+            subject=f["subject"], file_type=f["file_type"], source=f["source"],
+            file_name=f["file_name"], file_id=f["file_id"], mime_type=f["mime_type"],
+            file_size=f["file_size"], added_by=query.from_user.id,
+        )
+        added += 1
+    report = f"✅ تم استيراد *{added}* ملف إلى المكتبة."
+    if skipped_dup:
+        report += f"\n⏭️ تُجوهل {skipped_dup} (مكرر موجود مسبقاً)."
+    if skipped_nosubj:
+        report += f"\n⚠️ تُجوهل {len(skipped_nosubj)} لتعذّر تصنيف مادتها."
+    await query.message.reply_text(report, parse_mode="Markdown")
+    return ConversationHandler.END
 
 
 # ----- إضافة ملف: استقبال ثم تصنيف -----
@@ -593,10 +738,24 @@ def build_application(token: str, db: Database) -> Application:
         fallbacks=[CommandHandler("cancel", cmd_cancel)],
         per_message=False,
     )
+    # محادثة الاستيراد الجماعي (أدمن)
+    bulk_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(bulk_entry, pattern=r"^admin:bulk$")],
+        states={
+            BF_FILES: [
+                MessageHandler(filters.Document.ALL | filters.PHOTO, bf_got_file),
+                MessageHandler(filters.Regex(r"^تم$") & filters.TEXT & ~filters.COMMAND, bf_done),
+            ],
+            BF_CONFIRM: [CallbackQueryHandler(bf_confirm, pattern=r"^bf:(yes|no)$")],
+        },
+        fallbacks=[CommandHandler("cancel", cmd_cancel)],
+        per_message=False,
+    )
     # زر الإحصائيات (بدون محادثة)
     app.add_handler(CallbackQueryHandler(on_admin_button, pattern=r"^admin:stats$"))
 
     app.add_handler(addfile_conv)
+    app.add_handler(bulk_conv)
     app.add_handler(addsession_conv)
     app.add_handler(announce_conv)
 
