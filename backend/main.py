@@ -482,6 +482,13 @@ async def api_plan_progress(plan_id: int, body: PlanProgressIn,
     return {"ok": True, "progress": progress, "done_count": done, "total_count": total}
 
 
+@app.get("/api/admin/library/export-ids")
+async def api_admin_export_ids(user: dict = Depends(tg_user)):
+    """تصدير file_id للملفات (للنسخ الاحتياطي والاستيراد الخارجي) — أدمن فقط."""
+    require_admin(user)
+    return {"files": await db.library_file_ids()}
+
+
 @app.get("/api/admin/overview")
 async def api_admin_overview(user: dict = Depends(tg_user)):
     require_admin(user)
