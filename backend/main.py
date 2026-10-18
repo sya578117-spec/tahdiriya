@@ -77,9 +77,25 @@ def require_admin(user: dict) -> dict:
 
 
 # ---------- دورة حياة التطبيق ----------
+async def _seed_questions():
+    """زرع بنك الأسئلة من ملف JSON عند أول تشغيل (القرص مؤقت على Render)."""
+    import json as _json
+    seed_path = os.path.join(BASE_DIR, "data", "seed_questions.json")
+    if not os.path.exists(seed_path):
+        return
+    cur = await db._conn.execute("SELECT COUNT(*) FROM question_bank")
+    if (await cur.fetchone())[0] > 0:
+        return
+    with open(seed_path, encoding="utf-8") as f:
+        questions = _json.load(f)
+    n = await db.qbank_import(questions)
+    log.info("seeded %d questions from JSON", n)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.init()
+    await _seed_questions()
     application = None
     if config.BOT_TOKEN:
         application = build_application(config.BOT_TOKEN, db)
@@ -545,6 +561,21 @@ async def api_qbank_note_set(qid: int, body: NoteIn, user: dict = Depends(tg_use
     return {"ok": True}
 
 
+@app.get("/api/admin/qbank/export")
+async def api_admin_qbank_export(user: dict = Depends(tg_user)):
+    """تصدير كل أسئلة البنك (للنسخ الاحتياطي وتحديث ملف الزرع) — أدمن فقط."""
+    require_admin(user)
+    import json as _json
+    assert db._conn is not None
+    cur = await db._conn.execute(
+        "SELECT subject, question, options, correct, source FROM question_bank ORDER BY id")
+    out = []
+    for r in await cur.fetchall():
+        out.append({"subject": r[0], "question": r[1],
+                    "options": _json.loads(r[2]), "correct": r[3], "source": r[4]})
+    return {"questions": out, "count": len(out)}
+
+
 @app.post("/api/admin/qbank/import")
 async def api_admin_qbank_import(body: QBankImportIn, user: dict = Depends(tg_user)):
     require_admin(user)
@@ -552,6 +583,46 @@ async def api_admin_qbank_import(body: QBankImportIn, user: dict = Depends(tg_us
         raise HTTPException(status_code=400, detail="قائمة الأسئلة غير صالحة")
     n = await db.qbank_import(body.questions)
     return {"ok": True, "imported": n}
+
+
+class QExtractIn(BaseModel):
+    library_id: int  # رقم الملف في المكتبة
+
+
+@app.post("/api/admin/qbank/extract")
+async def api_admin_qbank_extract(body: QExtractIn, request: Request,
+                                 user: dict = Depends(tg_user)):
+    """استخراج أسئلة من ملف دورات PDF في المكتبة — يعمل على الخادم مباشرة."""
+    require_admin(user)
+    item = await db.get_library_file(body.library_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="الملف غير موجود")
+    import tempfile
+    from . import qextract
+    bot_app = request.app.state.bot_app
+    if not bot_app:
+        raise HTTPException(status_code=503, detail="البوت غير متصل حالياً")
+    try:
+        tg_file = await bot_app.bot.get_file(item["file_id"])
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            await tg_file.download_to_drive(tmp.name)
+            tmp_path = tmp.name
+        with open(tmp_path, "rb") as f:
+            pdf_bytes = f.read()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"تعذّر تحميل الملف: {type(exc).__name__}")
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        questions = qextract.extract_questions(pdf_bytes, item["subject"], item["source"] or item["file_name"])
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=422, detail=f"تعذّر تحليل الملف: {type(exc).__name__}")
+    n = await db.qbank_import(questions)
+    return {"ok": True, "parsed": len(questions), "imported": n,
+            "file": item["file_name"]}
 
 
 @app.get("/api/admin/library/export-ids")
